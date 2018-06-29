@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/metrics"
 )
 
 var ErrEmpty = errors.New("Empty string")
@@ -73,5 +75,33 @@ func (mw loggingMiddleware) Count(ctx context.Context, s string) (n int) {
 		)
 	}(time.Now())
 	n = mw.next.Count(ctx, s)
+	return
+}
+
+type instrumentingMiddleware struct {
+	requestCount   metrics.Counter
+	requestLatency metrics.Histogram
+	cuntResult     metrics.Histogram
+	next           StringService
+}
+
+func (im instrumentingMiddleware) Uppercase(ctx context.Context, s string) (output string, err error) {
+	defer func(begin time.Time) {
+		lvs := []string{"method", "uppercase", "error", fmt.Sprint(err != nil)}
+		im.requestCount.With(lvs...).Add(1)
+		im.requestLatency.With(lvs...).Observe(time.Since(begin).Seconds())
+	}(time.Now())
+	output, err = im.next.Uppercase(ctx, s)
+	return
+}
+
+func (im instrumentingMiddleware) Count(ctx context.Context, s string) (n int) {
+	defer func(begin time.Time) {
+		lvs := []string{"method", "uppercase", "error", "false"}
+		im.requestCount.With(lvs...).Add(1)
+		im.requestLatency.With(lvs...).Observe(time.Since(begin).Seconds())
+		im.cuntResult.Observe(float64(n))
+	}(time.Now())
+	n = im.next.Count(ctx, s)
 	return
 }
