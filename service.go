@@ -2,106 +2,73 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"net/http"
 	"strings"
-	"time"
-
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/metrics"
 )
 
-var ErrEmpty = errors.New("Empty string")
-
+// StringService _
 type StringService interface {
 	Uppercase(context.Context, string) (string, error)
 	Count(context.Context, string) int
 }
 
-type stringService struct {
-}
+type stringService struct{}
 
-func (stringService) Uppercase(ctx context.Context, s string) (string, error) {
-
-	if s == "" {
-		return "", ErrEmpty
+func (stringService) Uppercase(ctx context.Context, str string) (string, error) {
+	if str == "" {
+		return "", errors.New("Empty string")
 	}
-
-	return strings.ToUpper(s), nil
+	return strings.ToUpper(str), nil
 }
 
-func (stringService) Count(ctx context.Context, s string) int {
-	return len(s)
+func (stringService) Count(ctx context.Context, str string) int {
+	return len(str)
 }
 
-/*
-type Midleware func(endpoint.Endpoint) endpoint.Endpoint
+// Model expected client request for uppercase resource
+type uppercaseRequest struct {
+	Str string `json:"str"`
+}
 
-func loggingMidleware(logger log.Logger) Midleware {
-	return func(next endpoint.Endpoint) endpoint.Endpoint { // return a Middleware
-		return func(ctx context.Context, request interface{}) (interface{}, error) { // Return an endpoint
-			logger.Log("msj", "calling endpoint")
-			defer logger.Log("msj", "called endpoint")
-			return next(ctx, request) // return an endpoint (call the original one)
-		}
+// Model server response for uppercase resource
+type uppercaseResponse struct {
+	Result string `json:"result"`
+	Error  string `json:"error"` // Errors don't JSON-Marshal, so we use a string
+}
+
+// Model expected client request for count resource
+type countRequest struct {
+	Str string `json:"str"`
+}
+
+// Model server response for count resource
+type countReponse struct {
+	Count int `json:"count"`
+}
+
+// Parse request body into a uppercaseRequest object
+func decodeUppercaseRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	var req uppercaseRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		return nil, err
 	}
-}*/
-
-type loggingMiddleware struct {
-	logger log.Logger
-	next   StringService
+	return req, nil
 }
 
-func (mw loggingMiddleware) Uppercase(ctx context.Context, s string) (output string, err error) {
-	defer func(t time.Time) {
-		mw.logger.Log(
-			"method", "uppercase",
-			"input", s,
-			"output", output,
-			"err", err,
-			"took", time.Since(t),
-		)
-	}(time.Now())
-	return mw.next.Uppercase(ctx, s)
+// Parse request body into a countRequest object
+func decodeCountRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	var req countRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
-func (mw loggingMiddleware) Count(ctx context.Context, s string) (n int) {
-	defer func(t time.Time) {
-		mw.logger.Log(
-			"method", "count",
-			"input", s,
-			"n", n,
-			"took", time.Since(t),
-		)
-	}(time.Now())
-	n = mw.next.Count(ctx, s)
-	return
-}
-
-type instrumentingMiddleware struct {
-	requestCount   metrics.Counter
-	requestLatency metrics.Histogram
-	cuntResult     metrics.Histogram
-	next           StringService
-}
-
-func (im instrumentingMiddleware) Uppercase(ctx context.Context, s string) (output string, err error) {
-	defer func(begin time.Time) {
-		lvs := []string{"method", "uppercase", "error", fmt.Sprint(err != nil)}
-		im.requestCount.With(lvs...).Add(1)
-		im.requestLatency.With(lvs...).Observe(time.Since(begin).Seconds())
-	}(time.Now())
-	output, err = im.next.Uppercase(ctx, s)
-	return
-}
-
-func (im instrumentingMiddleware) Count(ctx context.Context, s string) (n int) {
-	defer func(begin time.Time) {
-		lvs := []string{"method", "uppercase", "error", "false"}
-		im.requestCount.With(lvs...).Add(1)
-		im.requestLatency.With(lvs...).Observe(time.Since(begin).Seconds())
-		im.cuntResult.Observe(float64(n))
-	}(time.Now())
-	n = im.next.Count(ctx, s)
-	return
+// We can use one encode procedure for both calls, since we only need to encode the provided response into a json object
+func encodeResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
+	return json.NewEncoder(w).Encode(response)
 }
